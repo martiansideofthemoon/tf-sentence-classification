@@ -1,0 +1,4 @@
+*.pickle
+*.tfrecords
+*.pyc
+*.bin
