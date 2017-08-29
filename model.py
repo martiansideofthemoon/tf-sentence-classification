@@ -1,13 +1,24 @@
+import logging
 import tensorflow as tf
 
 
+def random_uniform(limit):
+    return tf.random_uniform_initializer(-limit, limit)
+
+
 class SentimentModel(object):
-    def __init__(self, config, queue):
+    def __init__(self, args, queue=None, mode='train'):
+        self.logger = logger = logging.getLogger(__name__)
+        self.config = config = args.config
         # Epoch variable and its update op
         self.epoch = tf.Variable(0, trainable=False)
         self.epoch_incr = self.epoch.assign(self.epoch + 1)
         self.queue = queue
         self.embedding_size = e_size = config.embedding_size
+        self.num_classes = num_classes = config.num_classes
+        self.batch_size = batch_size = config.batch_size
+        self.keep_prob = keep_prob = config.keep_prob
+        self.clipped_norm = clipped_norm = config.clipped_norm
 
         # Learning rate variable and it's update op
         self.learning_rate = tf.get_variable(
@@ -16,24 +27,69 @@ class SentimentModel(object):
         )
         self.global_step = tf.Variable(0, trainable=False)
 
-        self.inputs, self.labels, self.seq_len = self.get_queue_batch()
+        if mode == 'train':
+            # Using queues for training
+            self.inputs, self.labels, self.seq_len = self.get_queue_batch()
+        else:
+            # Feeding inputs for evaluation
+            self.inputs = tf.placeholder(tf.int64, [self.batch_size, None])
+            self.labels = tf.placeholder(tf.int64, [self.batch_size])
+            self.seq_len = tf.placeholder(tf.int64, [self.batch_size])
 
         # Logic for embeddings
-        w2v_embeddings = tf.placeholder(tf.float32, [config.vocab_size, e_size])
-        embeddings = tf.get_variable("embedding", [config.vocab_size, e_size])
+        self.w2v_embeddings = tf.placeholder(tf.float32, [args.vocab_size, e_size])
+        embeddings = tf.get_variable("embedding", [args.vocab_size, e_size], initializer=random_uniform(0.25))
         # Used in the static / non-static configurations
-        self.load_embeddings = embeddings.assign(w2v_embeddings)
+        self.load_embeddings = embeddings.assign(self.w2v_embeddings)
         # Looking up input embeddings
-        input_vectors = tf.nn.embedding_lookup(embeddings, self.input_data)
+        input_vectors = tf.nn.embedding_lookup(embeddings, self.inputs)
 
         # Apply a convolutional layer
         input_vectors = tf.expand_dims(input_vectors, axis=3)
-        for i, (size, channels) in enumerate(config.conv_filters):
-            conv_filter = tf.get_variable("conv_filter%d" % i, [size, e_size, 1, channels])
-            bias = tf.get_variable("conv_bias%d" % i, [channels])
-            tf.nn.conv2d(input_vectors, )
+        conv_outputs = []
+        for i, filter_specs in enumerate(config.conv_filters):
+            size = filter_specs['size']
+            channels = filter_specs['channels']
+            with tf.variable_scope("conv%d" % i, initializer=random_uniform(0.05)):
+                # Convolution Layer begins
+                conv_filter = tf.get_variable("conv_filter%d" % i, [size, e_size, 1, channels])
+                bias = tf.get_variable("conv_bias%d" % i, [channels])
+                output = tf.nn.conv2d(input_vectors, conv_filter, [1, 1, 1, 1], "VALID") + bias
+                time_size = tf.shape(output)[1]
+                # Apply sequence length mask
+                modified_seq_lens = tf.nn.relu(self.seq_len - size + 1)
+                mask = tf.sequence_mask(modified_seq_lens, maxlen=time_size, dtype=tf.float32)
+                mask = tf.expand_dims(tf.expand_dims(mask, axis=2), axis=3)
+                output = tf.multiply(output, mask)
+                # Applying non-linearity
+                output = tf.nn.relu(output)
+                # Pooling layer, max over time for each channel
+                output = tf.reduce_max(output, axis=[1, 2])
+                conv_outputs.append(output)
+
+        # Concatenate all different filter outputs before fully connected layers
+        conv_outputs = tf.concat(conv_outputs, axis=1)
+        total_channels = conv_outputs.get_shape()[-1]
 
         # Apply a fully connected layer
+        with tf.variable_scope("full_connected", initializer=random_uniform(0.05)):
+            W = tf.get_variable("fc_weight", [total_channels, num_classes])
+            clipped_W = tf.clip_by_norm(W, clipped_norm)
+            b = tf.get_variable("fc_bias", [num_classes])
+            self.logits = tf.matmul(conv_outputs, W) + b
+
+        # Adding a dropout layer during training
+        if mode == 'train':
+            self.logits = tf.nn.dropout(self.logits, keep_prob=keep_prob)
+
+        # Declare the loss function
+        self.softmax = tf.nn.softmax(self.logits)
+        one_hot_labels = tf.one_hot(self.labels, num_classes)
+        self.loss = tf.nn.softmax_cross_entropy_with_logits(
+            logits=self.logits,
+            labels=one_hot_labels
+        )
+        self.losses = tf.reduce_sum(self.loss) / batch_size
 
         if config.optimizer == 'adadelta':
             opt = tf.train.AdadeltaOptimizer(
@@ -44,9 +100,18 @@ class SentimentModel(object):
         else:
             opt = tf.train.AdamOptimizer(self.learning_rate)
 
+        if mode == 'train':
+            for variable in tf.trainable_variables():
+                logger.info("%s - %s", variable.name, str(variable.get_shape()))
         # Apply optimizer to minimize loss
+        self.updates = opt.minimize(self.losses, global_step=self.global_step)
 
         # Clip fully connected layer's norm
+        with tf.control_dependencies([self.updates]):
+            self.clip = W.assign(clipped_W)
+
+        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=5)
+        self.best_saver = tf.train.Saver(tf.global_variables(), max_to_keep=2)
 
     def get_queue_batch(self):
         reader = tf.TFRecordReader()
@@ -63,8 +128,23 @@ class SentimentModel(object):
             context_features=context_features,
             sequence_features=sequence_features
         )
+
+        inputs = [sequence['sentence'], context['label'], context['sentence_len']]
+
+        # The code below is used to shuffle the input sequence
+        # reference - https://github.com/tensorflow/tensorflow/issues/5147#issuecomment-271086206
+        dtypes = list(map(lambda x: x.dtype, inputs))
+        shapes = list(map(lambda x: x.get_shape(), inputs))
+        queue = tf.RandomShuffleQueue(2000, 400, dtypes)
+        enqueue_op = queue.enqueue(inputs)
+        qr = tf.train.QueueRunner(queue, [enqueue_op] * 2)
+        tf.add_to_collection(tf.GraphKeys.QUEUE_RUNNERS, qr)
+        inputs = queue.dequeue()
+        for tensor, shape in zip(inputs, shapes):
+            tensor.set_shape(shape)
+
         return tf.train.batch(
-            tensors=[sequence['sentence'], context['label'], context['sentence_len']],
+            tensors=inputs,
             batch_size=self.batch_size,
             capacity=2000,
             num_threads=1,
