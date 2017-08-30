@@ -1,5 +1,6 @@
 import cPickle
 import glob
+import math
 import logging
 import os
 import sys
@@ -26,7 +27,12 @@ logger = logging.getLogger(__name__)
 def main():
     args = parser.parse_args()
     modify_arguments(args)
+
+    # Resetting the graph and setting seeds
+    tf.reset_default_graph()
     tf.set_random_seed(args.seed)
+    np.random.seed(args.seed)
+
     with open(args.config_file, 'r') as stream:
         args.config = bunchify(yaml.load(stream))
     if args.mode == 'train':
@@ -36,14 +42,16 @@ def main():
 
 
 def load_train_data(args):
+    logger.info("Loading training data from %s", args.data_dir)
     train_files = glob.glob(os.path.join(args.data_dir, "train*.tfrecords"))
     logger.info("%d training file(s) used", len(train_files))
     number_of_instances = 0
     for i, train_file in enumerate(train_files):
         number_of_instances += sum([1 for _ in tf.python_io.tf_record_iterator(train_file)])
         # Using ceil below since we allow for smaller final batch
-    num_batches = int(np.ceil(number_of_instances / float(args.config.batch_size)))
-    return train_files, num_batches
+    batches_per_epoch = int(np.ceil(number_of_instances / float(args.config.batch_size)))
+    logger.info("Total # of minibatches per epoch - %d", batches_per_epoch)
+    return train_files, number_of_instances
 
 
 def load_eval_data(args, split='dev'):
@@ -59,6 +67,26 @@ def load_vocab(args):
         rev_vocab = f.read().split('\n')
     vocab = {v: i for i, v in enumerate(rev_vocab)}
     return vocab, rev_vocab
+
+
+def load_w2v(args, rev_vocab):
+    with open(os.path.join(args.data_dir, args.w2v_file), 'rb') as f:
+        w2v = cPickle.load(f)
+    # Sanity check of the order of vectors
+    for i, word in enumerate(rev_vocab):
+        if w2v[i]['word'] != word:
+            logger.info("Incorrect w2v file")
+            sys.exit(0)
+    w2v_array = np.array([x['vector'] for x in w2v])
+    return w2v_array
+
+
+def initialize_w2v(sess, model, w2v_array):
+    feed_dict = {
+        model.w2v_embeddings.name: w2v_array
+    }
+    sess.run(model.load_embeddings, feed_dict=feed_dict)
+    logger.info("loaded word2vec values")
 
 
 def initialize_weights(sess, model, args, mode='train'):
@@ -132,6 +160,8 @@ def test(args):
 
 
 def train(args):
+    max_epochs = args.config.max_epochs
+    batch_size = args.config.batch_size
     if args.device == "gpu":
         cfg_proto = tf.ConfigProto(intra_op_parallelism_threads=2)
     else:
@@ -142,10 +172,9 @@ def train(args):
         args.vocab_size = len(rev_vocab)
 
         # Loading all the training data
-        logger.info("Loading training data from %s", args.data_dir)
-        train_files, num_batches = load_train_data(args)
-        logger.info("Total # of minibatches - %d", num_batches)
-        queue = tf.train.string_input_producer(train_files, shuffle=True)
+        train_files, traing_size = load_train_data(args)
+        remaining_examples = traing_size * max_epochs
+        queue = tf.train.string_input_producer(train_files, num_epochs=max_epochs, shuffle=True)
 
         # Creating training model
         with tf.variable_scope("model", reuse=None):
@@ -157,14 +186,8 @@ def train(args):
         # Load the w2v embeddings
         # and mode == static / non-static
         if steps_done == 0:
-            with open(os.path.join(args.data_dir, args.w2v_file), 'rb') as f:
-                w2v = cPickle.load(f)
-            w2v_array = np.array([np.array(w2v[x]) for x in rev_vocab])
-            feed_dict = {
-                model.w2v_embeddings.name: w2v_array
-            }
-            sess.run(model.load_embeddings, feed_dict=feed_dict)
-            logger.info("loaded word2vec values")
+            w2v_array = load_w2v(args, rev_vocab)
+            initialize_w2v(sess, model, w2v_array)
 
         # Reusing weights for evaluation model
         with tf.variable_scope("model", reuse=True):
@@ -176,11 +199,23 @@ def train(args):
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=sess, coord=coord)
         percent_best = 0.0
-        while epoch < args.config.max_epochs:
+        while epoch < max_epochs:
+            logger.info("Epochs done - %d", epoch)
+            frac_num_batches = float(remaining_examples) / (max_epochs - epoch) / batch_size
+            if epoch == max_epochs - 1:
+                # Last batch may have some extra elements
+                num_batches = math.ceil(frac_num_batches)
+            else:
+                num_batches = round(frac_num_batches)
+            num_batches = int(num_batches)
+            logger.info(
+                "%d remaining examples, %d epochs left, %.4f fractional number of batches, %d chosen",
+                remaining_examples, max_epochs - epoch, frac_num_batches, num_batches
+            )
+            remaining_examples -= num_batches * batch_size
             epoch_start = time.time()
             if coord.should_stop():
                 break
-            logger.info("Epochs done - %d", epoch)
             for i in range(1, num_batches + 1):
                 output_feed = [
                     model.updates,

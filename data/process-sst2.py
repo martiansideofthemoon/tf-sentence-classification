@@ -98,7 +98,7 @@ def add_random_vectors(word_to_vec, rev_vocab, vector_size):
 
 def write_pickle(pickle_path, data, vocab):
     pickle_output = []
-    for datum in data:
+    for i, datum in enumerate(data):
         sentence = [vocab[x] for x in datum['text'].split()]
         sentence_len = datum['num_words']
         label = datum['label']
@@ -109,7 +109,8 @@ def write_pickle(pickle_path, data, vocab):
         pickle_output.append({
             'sentence': sentence,
             'label': label,
-            'sentence_len': sentence_len
+            'sentence_len': sentence_len,
+            'segment_id': i
         })
     cPickle.dump(pickle_output, open(pickle_path, "wb"))
 
@@ -124,11 +125,12 @@ def write_tfrecords(tfrecords_path, data, vocab):
 
     writer = tf.python_io.TFRecordWriter(tfrecords_path)
 
-    for datum in data:
+    for i, datum in enumerate(data):
         sentence = [vocab[x] for x in datum['text'].split()]
         context = tf.train.Features(feature={
             "sentence_len": _int64_feature([datum['num_words']]),
-            "label": _int64_feature([datum['label']])
+            "label": _int64_feature([datum['label']]),
+            "segment_id": _int64_feature([i])
         })
         feature_lists = tf.train.FeatureLists(feature_list={
             "sentence": _seq_feature(values=sentence, dtype=_int64_feature)

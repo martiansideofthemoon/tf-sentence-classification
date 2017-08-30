@@ -29,12 +29,13 @@ class SentimentModel(object):
 
         if mode == 'train':
             # Using queues for training
-            self.inputs, self.labels, self.seq_len = self.get_queue_batch()
+            self.inputs, self.labels, self.seq_len, self.segment_id = self.get_queue_batch()
         else:
             # Feeding inputs for evaluation
             self.inputs = tf.placeholder(tf.int64, [self.batch_size, None])
             self.labels = tf.placeholder(tf.int64, [self.batch_size])
             self.seq_len = tf.placeholder(tf.int64, [self.batch_size])
+            self.segment_id = tf.placeholder(tf.int64, [self.batch_size])
 
         # Logic for embeddings
         self.w2v_embeddings = tf.placeholder(tf.float32, [args.vocab_size, e_size])
@@ -73,9 +74,9 @@ class SentimentModel(object):
 
         # Apply a fully connected layer
         with tf.variable_scope("full_connected", initializer=random_uniform(0.05)):
-            W = tf.get_variable("fc_weight", [total_channels, num_classes])
-            clipped_W = tf.clip_by_norm(W, clipped_norm)
-            b = tf.get_variable("fc_bias", [num_classes])
+            self.W = W = tf.get_variable("fc_weight", [total_channels, num_classes])
+            self.clipped_W = clipped_W = tf.clip_by_norm(W, clipped_norm)
+            self.b = b = tf.get_variable("fc_bias", [num_classes])
             self.logits = tf.matmul(conv_outputs, W) + b
 
         # Adding a dropout layer during training
@@ -118,7 +119,8 @@ class SentimentModel(object):
         _, serialized = reader.read(self.queue)
         context_features = {
             "sentence_len": tf.FixedLenFeature([], tf.int64),
-            "label": tf.FixedLenFeature([], tf.int64)
+            "label": tf.FixedLenFeature([], tf.int64),
+            "segment_id": tf.FixedLenFeature([], tf.int64)
         }
         sequence_features = {
             "sentence": tf.FixedLenSequenceFeature(shape=[], dtype=tf.int64)
@@ -129,15 +131,15 @@ class SentimentModel(object):
             sequence_features=sequence_features
         )
 
-        inputs = [sequence['sentence'], context['label'], context['sentence_len']]
+        inputs = [sequence['sentence'], context['label'], context['sentence_len'], context['segment_id']]
 
         # The code below is used to shuffle the input sequence
         # reference - https://github.com/tensorflow/tensorflow/issues/5147#issuecomment-271086206
         dtypes = list(map(lambda x: x.dtype, inputs))
         shapes = list(map(lambda x: x.get_shape(), inputs))
-        queue = tf.RandomShuffleQueue(2000, 400, dtypes)
+        self.random_queue = queue = tf.RandomShuffleQueue(2000, 1999, dtypes)
         enqueue_op = queue.enqueue(inputs)
-        qr = tf.train.QueueRunner(queue, [enqueue_op] * 2)
+        qr = tf.train.QueueRunner(queue, [enqueue_op])
         tf.add_to_collection(tf.GraphKeys.QUEUE_RUNNERS, qr)
         inputs = queue.dequeue()
         for tensor, shape in zip(inputs, shapes):
