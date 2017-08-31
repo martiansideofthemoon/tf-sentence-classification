@@ -1,5 +1,6 @@
 import cPickle
 import os
+import random
 import re
 import sys
 
@@ -8,7 +9,8 @@ import tensorflow as tf
 
 from collections import defaultdict
 
-np.random.seed(7294258)
+np.random.seed(1)
+random.seed(1)
 
 
 def load_bin_vec(fname, vocab):
@@ -42,7 +44,7 @@ def build_data(filename, word_freq, clean_string=True):
     """
     revs = []
     with open(filename, "rb") as f:
-        for line in f:
+        for line_no, line in enumerate(f):
             line = line.strip()
             label = int(line[0])
             input_str = line[2:].strip()
@@ -56,9 +58,11 @@ def build_data(filename, word_freq, clean_string=True):
             datum = {
                 "label": label,
                 "text": orig_rev,
-                "num_words": len(orig_rev.split())
+                "num_words": len(orig_rev.split()),
+                "sentence_id": line_no
             }
             revs.append(datum)
+    random.shuffle(revs)
     return revs
 
 
@@ -102,6 +106,7 @@ def write_pickle(pickle_path, data, vocab):
         sentence = [vocab[x] for x in datum['text'].split()]
         sentence_len = datum['num_words']
         label = datum['label']
+        sentence_id = datum['sentence_id']
         # Sanity check before save
         if sentence_len != len(sentence):
             print "error!"
@@ -110,7 +115,8 @@ def write_pickle(pickle_path, data, vocab):
             'sentence': sentence,
             'label': label,
             'sentence_len': sentence_len,
-            'segment_id': i
+            "sentence_id": sentence_id,
+            'order_id': i
         })
     cPickle.dump(pickle_output, open(pickle_path, "wb"))
 
@@ -130,7 +136,8 @@ def write_tfrecords(tfrecords_path, data, vocab):
         context = tf.train.Features(feature={
             "sentence_len": _int64_feature([datum['num_words']]),
             "label": _int64_feature([datum['label']]),
-            "segment_id": _int64_feature([i])
+            "sentence_id": _int64_feature([datum['sentence_id']]),
+            "order_id": _int64_feature([i])
         })
         feature_lists = tf.train.FeatureLists(feature_list={
             "sentence": _seq_feature(values=sentence, dtype=_int64_feature)

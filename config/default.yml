@@ -12,6 +12,6 @@ conv_filters:
       channels: 100
     - size: 5
       channels: 100
-max_epochs: 20
-eval_frequency: 500
-cnn_mode: nonstatic
+max_epochs: 1
+eval_frequency: 10
+cnn_mode: rand

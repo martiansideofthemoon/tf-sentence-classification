@@ -119,10 +119,17 @@ def initialize_weights(sess, model, args, mode='train'):
 
 def evaluate(sess, model_dev, data, args):
     batch_size = args.config.batch_size
-    num_batches = int(np.ceil(len(data) / batch_size))
+    num_batches = int(np.ceil(float(len(data)) / batch_size))
     correct = 0
     for i in range(num_batches):
         split = data[i * batch_size:(i + 1) * batch_size]
+        if len(split) < batch_size:
+            total = len(split)
+            last = split[-1]
+            for j in range(batch_size - total):
+                split.append(last)
+        else:
+            total = batch_size
         seq_len = np.array([x['sentence_len'] for x in split])
         max_seq_len = np.max(seq_len)
         labels = np.array([x['label'] for x in split])
@@ -134,7 +141,7 @@ def evaluate(sess, model_dev, data, args):
         }
         outputs = sess.run(model_dev.softmax, feed_dict=feed_dict)
         outputs = np.argmax(outputs, axis=1)
-        correct += np.sum(outputs == labels)
+        correct += np.sum(outputs[:total] == labels[:total])
     return correct
 
 
@@ -172,8 +179,7 @@ def train(args):
         args.vocab_size = len(rev_vocab)
 
         # Loading all the training data
-        train_files, traing_size = load_train_data(args)
-        remaining_examples = traing_size * max_epochs
+        train_files, training_size = load_train_data(args)
         queue = tf.train.string_input_producer(train_files, num_epochs=max_epochs, shuffle=True)
 
         # Creating training model
@@ -195,6 +201,7 @@ def train(args):
 
         # This need not be zero due to incomplete runs
         epoch = model.epoch.eval()
+        remaining_examples = training_size * max_epochs - (model.global_step.eval() * batch_size)
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=sess, coord=coord)
         percent_best = 0.0
@@ -240,11 +247,11 @@ def train(args):
                     # Also save the model for continuing in future
                     checkpoint_path = os.path.join(args.train_dir, "sentence.ckpt")
                     model.saver.save(sess, checkpoint_path, global_step=model.global_step, write_meta_graph=False)
-            checkpoint_path = os.path.join(args.train_dir, "sentence.ckpt")
-            model.saver.save(sess, checkpoint_path, global_step=model.global_step, write_meta_graph=False)
             # Update epoch counter
             sess.run(model.epoch_incr)
             epoch += 1
+            checkpoint_path = os.path.join(args.train_dir, "sentence.ckpt")
+            model.saver.save(sess, checkpoint_path, global_step=model.global_step, write_meta_graph=False)
         coord.request_stop()
         coord.join(threads)
 

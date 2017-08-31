@@ -58,33 +58,36 @@ class SentimentModel(object):
         input_vectors = tf.nn.embedding_lookup(embeddings, self.inputs)
 
         # Apply a convolutional layer
-        input_vectors = tf.expand_dims(input_vectors, axis=3)
+        self.input_vectors = input_vectors = tf.expand_dims(input_vectors, axis=3)
         conv_outputs = []
+        self.debug = []
         for i, filter_specs in enumerate(config.conv_filters):
             size = filter_specs['size']
             channels = filter_specs['channels']
+            debug = {}
             with tf.variable_scope("conv%d" % i):
                 # Convolution Layer begins
-                conv_filter = tf.get_variable(
+                debug['filter'] = conv_filter = tf.get_variable(
                     "conv_filter%d" % i, [size, e_size, 1, channels],
                     initializer=random_uniform(0.01)
                 )
-                bias = tf.get_variable(
+                debug['bias'] = bias = tf.get_variable(
                     "conv_bias%d" % i, [channels],
                     initializer=tf.zeros_initializer()
                 )
-                output = tf.nn.conv2d(input_vectors, conv_filter, [1, 1, 1, 1], "VALID") + bias
+                debug['conv_out'] = output = tf.nn.conv2d(input_vectors, conv_filter, [1, 1, 1, 1], "VALID") + bias
                 time_size = tf.shape(output)[1]
                 # Apply sequence length mask
                 modified_seq_lens = tf.nn.relu(self.seq_len - size + 1)
                 mask = tf.sequence_mask(modified_seq_lens, maxlen=time_size, dtype=tf.float32)
-                mask = tf.expand_dims(tf.expand_dims(mask, axis=2), axis=3)
-                output = tf.multiply(output, mask)
+                debug['mask'] = mask = tf.expand_dims(tf.expand_dims(mask, axis=2), axis=3)
+                debug['mask_out'] = output = tf.multiply(output, mask)
                 # Applying non-linearity
                 output = tf.nn.relu(output)
                 # Pooling layer, max over time for each channel
-                output = tf.reduce_max(output, axis=[1, 2])
+                debug['output'] = output = tf.reduce_max(output, axis=[1, 2])
                 conv_outputs.append(output)
+                self.debug.append(debug)
 
         # Concatenate all different filter outputs before fully connected layers
         conv_outputs = tf.concat(conv_outputs, axis=1)
@@ -147,7 +150,7 @@ class SentimentModel(object):
         context_features = {
             "sentence_len": tf.FixedLenFeature([], tf.int64),
             "label": tf.FixedLenFeature([], tf.int64),
-            "segment_id": tf.FixedLenFeature([], tf.int64)
+            "order_id": tf.FixedLenFeature([], tf.int64)
         }
         sequence_features = {
             "sentence": tf.FixedLenSequenceFeature(shape=[], dtype=tf.int64)
@@ -158,7 +161,7 @@ class SentimentModel(object):
             sequence_features=sequence_features
         )
 
-        inputs = [sequence['sentence'], context['label'], context['sentence_len'], context['segment_id']]
+        inputs = [sequence['sentence'], context['label'], context['sentence_len'], context['order_id']]
 
         # The code below is used to shuffle the input sequence
         # reference - https://github.com/tensorflow/tensorflow/issues/5147#issuecomment-271086206
