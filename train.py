@@ -184,8 +184,7 @@ def train(args):
         logger.info("loaded %d completed steps", steps_done)
 
         # Load the w2v embeddings
-        # and mode == static / non-static
-        if steps_done == 0:
+        if steps_done == 0 and args.config.cnn_mode != 'rand':
             w2v_array = load_w2v(args, rev_vocab)
             initialize_w2v(sess, model, w2v_array)
 

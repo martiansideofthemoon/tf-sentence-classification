@@ -1,4 +1,5 @@
 import logging
+import math
 import tensorflow as tf
 
 
@@ -39,7 +40,18 @@ class SentimentModel(object):
 
         # Logic for embeddings
         self.w2v_embeddings = tf.placeholder(tf.float32, [args.vocab_size, e_size])
-        embeddings = tf.get_variable("embedding", [args.vocab_size, e_size], initializer=random_uniform(0.25))
+        if args.config.cnn_mode == 'static':
+            embeddings = tf.get_variable(
+                "embedding", [args.vocab_size, e_size],
+                initializer=random_uniform(0.25),
+                trainable=False
+            )
+        else:
+            embeddings = tf.get_variable(
+                "embedding", [args.vocab_size, e_size],
+                initializer=random_uniform(0.25),
+                trainable=True
+            )
         # Used in the static / non-static configurations
         self.load_embeddings = embeddings.assign(self.w2v_embeddings)
         # Looking up input embeddings
@@ -51,10 +63,16 @@ class SentimentModel(object):
         for i, filter_specs in enumerate(config.conv_filters):
             size = filter_specs['size']
             channels = filter_specs['channels']
-            with tf.variable_scope("conv%d" % i, initializer=random_uniform(0.05)):
+            with tf.variable_scope("conv%d" % i):
                 # Convolution Layer begins
-                conv_filter = tf.get_variable("conv_filter%d" % i, [size, e_size, 1, channels])
-                bias = tf.get_variable("conv_bias%d" % i, [channels])
+                conv_filter = tf.get_variable(
+                    "conv_filter%d" % i, [size, e_size, 1, channels],
+                    initializer=random_uniform(0.01)
+                )
+                bias = tf.get_variable(
+                    "conv_bias%d" % i, [channels],
+                    initializer=tf.zeros_initializer()
+                )
                 output = tf.nn.conv2d(input_vectors, conv_filter, [1, 1, 1, 1], "VALID") + bias
                 time_size = tf.shape(output)[1]
                 # Apply sequence length mask
@@ -72,16 +90,25 @@ class SentimentModel(object):
         conv_outputs = tf.concat(conv_outputs, axis=1)
         total_channels = conv_outputs.get_shape()[-1]
 
-        # Apply a fully connected layer
-        with tf.variable_scope("full_connected", initializer=random_uniform(0.05)):
-            self.W = W = tf.get_variable("fc_weight", [total_channels, num_classes])
-            self.clipped_W = clipped_W = tf.clip_by_norm(W, clipped_norm)
-            self.b = b = tf.get_variable("fc_bias", [num_classes])
-            self.logits = tf.matmul(conv_outputs, W) + b
-
         # Adding a dropout layer during training
         if mode == 'train':
-            self.logits = tf.nn.dropout(self.logits, keep_prob=keep_prob)
+            conv_outputs = tf.nn.dropout(conv_outputs, keep_prob=keep_prob)
+
+        # Apply a fully connected layer
+        with tf.variable_scope("full_connected"):
+            self.W = W = tf.get_variable(
+                "fc_weight", [total_channels, num_classes],
+                initializer=random_uniform(math.sqrt(6.0 / (total_channels.value + num_classes)))
+            )
+            self.clipped_W = clipped_W = tf.clip_by_norm(W, clipped_norm)
+            self.b = b = tf.get_variable(
+                "fc_bias", [num_classes],
+                initializer=tf.zeros_initializer()
+            )
+            if mode == 'train':
+                self.logits = tf.matmul(conv_outputs, W) + b
+            else:
+                self.logits = keep_prob * tf.matmul(conv_outputs, W) + b
 
         # Declare the loss function
         self.softmax = tf.nn.softmax(self.logits)
