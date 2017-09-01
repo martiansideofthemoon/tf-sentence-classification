@@ -121,6 +121,7 @@ def evaluate(sess, model_dev, data, args):
     batch_size = args.config.batch_size
     num_batches = int(np.ceil(float(len(data)) / batch_size))
     correct = 0
+    losses = 0.0
     incorrect = []
     for i in range(num_batches):
         split = data[i * batch_size:(i + 1) * batch_size]
@@ -140,13 +141,16 @@ def evaluate(sess, model_dev, data, args):
         sentences = np.array([np.lib.pad(x, (0, max_seq_len - len(x)), 'constant') for x in sents])
         feed_dict = {
             model_dev.inputs.name: sentences,
-            model_dev.seq_len.name: seq_len
+            model_dev.seq_len.name: seq_len,
+            model_dev.labels: labels
         }
-        outputs = sess.run(model_dev.softmax, feed_dict=feed_dict)
+        outputs, loss = sess.run([model_dev.softmax, model_dev.loss], feed_dict=feed_dict)
+        losses += np.sum(loss[:total])
         outputs = np.argmax(outputs, axis=1)
         correct += np.sum(outputs[:total] == labels[:total])
         incorrect.extend(sentence_id[outputs[:total] == labels[:total]].tolist())
-    return correct, incorrect
+    # losses = losses / len(data)
+    return correct, incorrect, losses
 
 
 def test(args):
@@ -165,11 +169,11 @@ def test(args):
         steps_done = initialize_weights(sess, model_test, args, mode='test')
         logger.info("loaded %d completed steps", steps_done)
         test_set = load_eval_data(args, split='test')
-        correct, incorrect = evaluate(sess, model_test, test_set, args)
+        correct, incorrect, losses = evaluate(sess, model_test, test_set, args)
         with open(os.path.join(args.train_dir, 'incorrect.txt'), 'w') as f:
             f.write(str(incorrect))
         percent_correct = float(correct) * 100.0 / len(test_set)
-        logger.info("Correct Predictions - %.4f", percent_correct)
+        logger.info("Correct Predictions - %.4f. Eval Losses - %.4f", percent_correct, losses)
 
 
 def train(args):
@@ -243,9 +247,9 @@ def train(args):
                     )
                 if i % args.config.eval_frequency == 0 or i == num_batches:
                     logger.info("Evaluating model after %d minibatches", i)
-                    correct, _ = evaluate(sess, model_eval, dev_set, args)
+                    correct, _, losses = evaluate(sess, model_eval, dev_set, args)
                     percent_correct = float(correct) * 100.0 / len(dev_set)
-                    logger.info("Correct Predictions - %.4f", percent_correct)
+                    logger.info("Correct Predictions - %.4f. Eval Loss - %.4f", percent_correct, losses)
                     if percent_correct > percent_best:
                         percent_best = percent_correct
                         logger.info("Saving Best Model")
