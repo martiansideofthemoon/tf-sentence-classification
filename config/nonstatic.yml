@@ -12,6 +12,7 @@ conv_filters:
       channels: 100
     - size: 5
       channels: 100
-max_epochs: 5
+max_epochs: 1
 eval_frequency: 50
+mask: False
 cnn_mode: nonstatic

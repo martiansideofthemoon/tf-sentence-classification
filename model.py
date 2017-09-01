@@ -76,12 +76,13 @@ class SentimentModel(object):
                     initializer=tf.zeros_initializer()
                 )
                 debug['conv_out'] = output = tf.nn.conv2d(input_vectors, conv_filter, [1, 1, 1, 1], "VALID") + bias
-                time_size = tf.shape(output)[1]
-                # Apply sequence length mask
-                modified_seq_lens = tf.nn.relu(self.seq_len - size + 1)
-                mask = tf.sequence_mask(modified_seq_lens, maxlen=time_size, dtype=tf.float32)
-                debug['mask'] = mask = tf.expand_dims(tf.expand_dims(mask, axis=2), axis=3)
-                debug['mask_out'] = output = tf.multiply(output, mask)
+                if config.mask is True:
+                    time_size = tf.shape(output)[1]
+                    # Apply sequence length mask
+                    modified_seq_lens = tf.nn.relu(self.seq_len - size + 1)
+                    mask = tf.sequence_mask(modified_seq_lens, maxlen=time_size, dtype=tf.float32)
+                    debug['mask'] = mask = tf.expand_dims(tf.expand_dims(mask, axis=2), axis=3)
+                    debug['mask_out'] = output = tf.multiply(output, mask)
                 # Applying non-linearity
                 output = tf.nn.relu(output)
                 # Pooling layer, max over time for each channel

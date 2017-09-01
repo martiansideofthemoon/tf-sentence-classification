@@ -121,6 +121,7 @@ def evaluate(sess, model_dev, data, args):
     batch_size = args.config.batch_size
     num_batches = int(np.ceil(float(len(data)) / batch_size))
     correct = 0
+    incorrect = []
     for i in range(num_batches):
         split = data[i * batch_size:(i + 1) * batch_size]
         if len(split) < batch_size:
@@ -131,6 +132,8 @@ def evaluate(sess, model_dev, data, args):
         else:
             total = batch_size
         seq_len = np.array([x['sentence_len'] for x in split])
+        sentence_id = np.array([x['sentence_id'] for x in split])
+        sentence_id = sentence_id[:total]
         max_seq_len = np.max(seq_len)
         labels = np.array([x['label'] for x in split])
         sents = [np.array(x['sentence']) for x in split]
@@ -142,7 +145,8 @@ def evaluate(sess, model_dev, data, args):
         outputs = sess.run(model_dev.softmax, feed_dict=feed_dict)
         outputs = np.argmax(outputs, axis=1)
         correct += np.sum(outputs[:total] == labels[:total])
-    return correct
+        incorrect.extend(sentence_id[outputs[:total] == labels[:total]].tolist())
+    return correct, incorrect
 
 
 def test(args):
@@ -161,7 +165,9 @@ def test(args):
         steps_done = initialize_weights(sess, model_test, args, mode='test')
         logger.info("loaded %d completed steps", steps_done)
         test_set = load_eval_data(args, split='test')
-        correct = evaluate(sess, model_test, test_set, args)
+        correct, incorrect = evaluate(sess, model_test, test_set, args)
+        with open(os.path.join(args.train_dir, 'incorrect.txt'), 'w') as f:
+            f.write(str(incorrect))
         percent_correct = float(correct) * 100.0 / len(test_set)
         logger.info("Correct Predictions - %.4f", percent_correct)
 
@@ -237,7 +243,7 @@ def train(args):
                     )
                 if i % args.config.eval_frequency == 0 or i == num_batches:
                     logger.info("Evaluating model after %d minibatches", i)
-                    correct = evaluate(sess, model_eval, dev_set, args)
+                    correct, _ = evaluate(sess, model_eval, dev_set, args)
                     percent_correct = float(correct) * 100.0 / len(dev_set)
                     logger.info("Correct Predictions - %.4f", percent_correct)
                     if percent_correct > percent_best:
