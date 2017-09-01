@@ -171,6 +171,7 @@ def train(args):
     batch_size = args.config.batch_size
     if args.device == "gpu":
         cfg_proto = tf.ConfigProto(intra_op_parallelism_threads=2)
+        cfg_proto.gpu_options.allow_growth = True
     else:
         cfg_proto = None
     with tf.Session(config=cfg_proto) as sess:

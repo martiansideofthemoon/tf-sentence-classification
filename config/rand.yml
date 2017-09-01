@@ -14,4 +14,4 @@ conv_filters:
       channels: 100
 max_epochs: 25
 eval_frequency: 500
-cnn_mode: nonstatic
+cnn_mode: rand

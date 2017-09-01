@@ -141,8 +141,8 @@ class SentimentModel(object):
         with tf.control_dependencies([self.updates]):
             self.clip = W.assign(clipped_W)
 
-        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=5)
-        self.best_saver = tf.train.Saver(tf.global_variables(), max_to_keep=2)
+        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=1)
+        self.best_saver = tf.train.Saver(tf.global_variables(), max_to_keep=1)
 
     def get_queue_batch(self):
         reader = tf.TFRecordReader()
