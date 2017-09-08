@@ -22,7 +22,7 @@ The model hyperparameters and mode (`nonstatic`, `static` and `rand`) are config
 All results have been averaged across 10 random seeds.
 
 Model | Dataset | Average | Std | Range |
-| ------------- |:-------------:| -----:| -----:| -----:|
+| ------------- |:-------------:|:-----:|:-----:|:-----:|
 [Kim14](https://arxiv.org/abs/1408.5882) - nonstatic | Phrases | 87.2 | - | - |
 Our [Kim14](https://arxiv.org/abs/1408.5882) - nonstatic | Phrases | 87.06 | 0.34 | 86.55 - 87.70 |
 Our [Kim14](https://arxiv.org/abs/1408.5882) - nonstatic | Sentences | 85.92 | 0.68 | 84.79 - 86.99 |
