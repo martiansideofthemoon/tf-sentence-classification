@@ -35,6 +35,9 @@ def main():
 
     with open(args.config_file, 'r') as stream:
         args.config = bunchify(yaml.load(stream))
+
+    logger.info(args)
+
     if args.mode == 'train':
         train(args)
     else:
