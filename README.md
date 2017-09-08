@@ -11,7 +11,7 @@ This project is roughly an exact TensorFlow implementation of Yoon Kim's paper [
 cd data
 chmod +x process_sst2.sh process_sst2_sentence.sh
 ./process_sst2.sh
-./process-sst2-sentence.sh
+./process_sst2_sentence.sh
 ```
 4. Run `python train.py` to train the model, and run `python train.py --mode test` to evaluate the model.
 
@@ -19,7 +19,7 @@ chmod +x process_sst2.sh process_sst2_sentence.sh
 The model hyperparameters and mode (`nonstatic`, `static` and `rand`) are configured via YAML files inside `config/`. All hyperparameters (except `batch_size`) are identical to those reported in the paper. You may change the training directory via the `--job_id` parameter, and the random seed using `--seed`. Look at `config/arguments.py` for more details.
 
 ## Results
-All results have been averaged across 10 random seeds. All reported results are on the [SST2 dataset](https://nlp.stanford.edu/sentiment/treebank.html).
+All results have been averaged across 10 random seeds. All reported results are on the [SST2 dataset](https://nlp.stanford.edu/sentiment/treebank.html). The models were trained on Titan X GPUs.
 
 Model | Dataset | Average | Std | Range |
 | ------------- |:-------------:|:-----:|:-----:|:-----:|
