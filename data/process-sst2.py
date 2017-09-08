@@ -12,6 +12,10 @@ from collections import defaultdict
 np.random.seed(1)
 random.seed(1)
 
+MAX_LEN = 53
+MAX_PAD = 4
+TOTAL_LEN = MAX_LEN + 2 * MAX_PAD
+
 
 def load_bin_vec(fname, vocab):
     """
@@ -55,10 +59,12 @@ def build_data(filename, word_freq, clean_string=True):
             words = set(orig_rev.split())
             for word in words:
                 word_freq[word] += 1
+            orig_rev = "<PAD> <PAD> <PAD> <PAD> " + orig_rev
+            orig_rev += " <PAD>" * (TOTAL_LEN - len(orig_rev.split()))
             datum = {
                 "label": label,
                 "text": orig_rev,
-                "num_words": len(orig_rev.split()),
+                "num_words": TOTAL_LEN,
                 "sentence_id": line_no
             }
             revs.append(datum)
