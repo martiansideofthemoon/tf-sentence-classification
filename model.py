@@ -109,10 +109,7 @@ class SentimentModel(object):
                 "fc_bias", [num_classes],
                 initializer=tf.zeros_initializer()
             )
-            if mode == 'train':
-                self.logits = tf.matmul(conv_outputs, W) + b
-            else:
-                self.logits = keep_prob * tf.matmul(conv_outputs, W) + b
+            self.logits = tf.matmul(conv_outputs, W) + b
 
         # Declare the loss function
         self.softmax = tf.nn.softmax(self.logits)
